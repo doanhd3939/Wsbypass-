@@ -1,1 +1,8 @@
-
+{
+  "name": "ws-bypass-tool",
+  "version": "1.0.0",
+  "main": "ws.js",
+  "scripts": {
+    "start": "node ws.js"
+  }
+}

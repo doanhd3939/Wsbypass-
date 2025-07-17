@@ -1,5 +1,4 @@
-// == Bypass Tool - WebSocket Automation Script ==
-// Đã chỉnh sửa: chuẩn hóa code, tối ưu cú pháp, vẫn giữ nguyên tất cả tính năng gốc.
+// == Bypass Tool - WebSocket Automation Script - Phiên bản tối ưu với log chi tiết và chống spam log ==
 
 (async () => {
     const WEBSOCKET_URI = "ws://localhost:8765";
@@ -7,6 +6,7 @@
     const MAX_CONNECTION_RETRIES = 10;
     const RETRY_CONNECTION_DELAY = 5000;
     const TASK_CHECK_INTERVAL = 3000;
+    const LOG_ERROR_DELAY = 3000; // Để tránh spam log lỗi
 
     const XPATHS = {
         keyword: '//*[@id="TK1"]',
@@ -23,10 +23,17 @@
     let countdownFinished = false;
     let isTaskActive = false;
     let connectionRetries = 0;
+    let lastErrorTime = 0;
 
-    const log = (message) => {
-        // Có thể thay thế console.log thành render ra UI nếu muốn
-        console.log(`[Bypass Tool] ${message}`);
+    const log = (message, isError = false) => {
+        const now = Date.now();
+        if (isError) {
+            if (now - lastErrorTime < LOG_ERROR_DELAY) return; // Chống spam lỗi
+            lastErrorTime = now;
+            console.error(`[Bypass Tool][LỖI] ${message}`);
+        } else {
+            console.log(`[Bypass Tool] ${message}`);
+        }
     };
 
     const xpath = (path) =>
@@ -34,7 +41,6 @@
 
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-    // Hàm click phần tử qua xpath, trả về true/false và có log rõ ràng
     const clickElementByXpath = async (path) => {
         log(`Đang tìm và click vào phần tử: ${path}`);
         const element = xpath(path);
@@ -44,11 +50,10 @@
             await sleep(250);
             return true;
         }
-        log(`Lỗi: Không tìm thấy phần tử để click: ${path}`);
+        log(`Lỗi: Không tìm thấy phần tử để click: ${path}`, true);
         return false;
     };
 
-    // Hàm nhập liệu giả lập người dùng (giữ nguyên tính năng gốc)
     const typeHumanLike = async (element, text) => {
         log(`Bắt đầu nhập mã: ${text}`);
         for (const char of text) {
@@ -59,7 +64,6 @@
         log(`Nhập mã hoàn tất.`);
     };
 
-    // Xử lý khi keyword không hợp lệ (vẫn đủ quy trình đổi mã)
     const handleInvalidKeyword = async () => {
         log("Từ khóa không hợp lệ. Bắt đầu quy trình đổi từ khóa...");
         await clickElementByXpath(XPATHS.errorButton);
@@ -72,7 +76,6 @@
         isTaskActive = false;
     };
 
-    // Hàm nhập code và submit
     const enterCodeAndSubmit = async (code) => {
         log("Countdown đã kết thúc và đã nhận được mã. Bắt đầu nhập liệu.");
         const inputField = xpath(XPATHS.inputField);
@@ -81,11 +84,10 @@
             await sleep(500);
             await clickElementByXpath(XPATHS.submitButton);
         } else {
-            log(`Lỗi: Không tìm thấy ô nhập mã tại xpath: ${XPATHS.inputField}`);
+            log(`Lỗi: Không tìm thấy ô nhập mã tại xpath: ${XPATHS.inputField}`, true);
         }
     };
 
-    // Đếm ngược cho mỗi tác vụ
     const startCountdown = () => {
         let timeLeft = COUNTDOWN_SECONDS;
         countdownFinished = false;
@@ -108,16 +110,21 @@
         }, 1000);
     };
 
-    // Kết nối WebSocket với server và tự động reconnect nếu lỗi
     const connectToServer = () => {
         if (ws && ws.readyState === WebSocket.OPEN) return;
         if (connectionRetries >= MAX_CONNECTION_RETRIES) {
-            log(`Đã thử kết nối ${MAX_CONNECTION_RETRIES} lần và thất bại. Dừng lại.`);
+            log(`Đã thử kết nối ${MAX_CONNECTION_RETRIES} lần và thất bại. Dừng lại.`, true);
             return;
         }
         connectionRetries++;
         log(`Đang kết nối tới server... (Lần ${connectionRetries}/${MAX_CONNECTION_RETRIES})`);
-        ws = new WebSocket(WEBSOCKET_URI);
+        try {
+            ws = new WebSocket(WEBSOCKET_URI);
+        } catch (err) {
+            log(`Không thể khởi tạo WebSocket: ${err?.message || err}`, true);
+            setTimeout(connectToServer, RETRY_CONNECTION_DELAY);
+            return;
+        }
 
         ws.onopen = () => {
             log("Kết nối tới server thành công.");
@@ -129,7 +136,7 @@
             try {
                 data = JSON.parse(event.data);
             } catch (e) {
-                log("Lỗi khi parse dữ liệu từ server.");
+                log("Lỗi khi parse dữ liệu từ server.", true);
                 return;
             }
             log(`Nhận được tin nhắn từ server: ${JSON.stringify(data)}`);
@@ -147,45 +154,41 @@
             }
         };
 
-        ws.onclose = () => {
-            log(`Mất kết nối với server. Sẽ thử kết nối lại sau ${RETRY_CONNECTION_DELAY / 1000} giây.`);
+        ws.onclose = (event) => {
+            let closeReason = event && event.reason ? ` - Lý do: ${event.reason}` : '';
+            log(`Mất kết nối với server${closeReason}. Sẽ thử kết nối lại sau ${RETRY_CONNECTION_DELAY / 1000} giây.`, true);
             ws = null;
             setTimeout(connectToServer, RETRY_CONNECTION_DELAY);
         };
 
         ws.onerror = (err) => {
-            log("Lỗi WebSocket. Kết nối sẽ tự đóng và thử lại.");
-            ws.close();
+            log(`Lỗi WebSocket: ${err?.message || err}. Kết nối sẽ tự đóng và thử lại.`, true);
+            try {
+                ws && ws.close();
+            } catch (e) {}
         };
     };
 
-    // Hàm chính kiểm tra từ khóa mới và gửi yêu cầu tới server
     const mainTaskExecutor = () => {
         if (isTaskActive) return;
-
         const keywordElement = xpath(XPATHS.keyword);
         const keyword = keywordElement ? keywordElement.innerText.trim() : null;
-
         if (keyword) {
             log(`Tìm thấy từ khóa mới: "${keyword}". Bắt đầu xử lý.`);
             isTaskActive = true;
-
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 log("Chưa có kết nối tới server. Đang đợi kết nối...");
                 isTaskActive = false;
                 return;
             }
-
             log(`Gửi yêu cầu xử lý từ khóa "${keyword}" tới server.`);
             ws.send(JSON.stringify({ type: "start_task", keyword: keyword }));
             startCountdown();
         }
     };
 
-    // Khởi động script
     log("Bypass tool đã khởi động. Bắt đầu vòng lặp kiểm tra tác vụ.");
     connectToServer();
     setInterval(mainTaskExecutor, TASK_CHECK_INTERVAL);
 
-    // Nếu muốn render ra UI, có thể bổ sung thêm code ở đây, ví dụ tạo popup, modal...
 })();

@@ -1,3 +1,6 @@
+// == Bypass Tool - WebSocket Automation Script ==
+// Đã chỉnh sửa: chuẩn hóa code, tối ưu cú pháp, vẫn giữ nguyên tất cả tính năng gốc.
+
 (async () => {
     const WEBSOCKET_URI = "ws://localhost:8765";
     const COUNTDOWN_SECONDS = 77;
@@ -21,10 +24,17 @@
     let isTaskActive = false;
     let connectionRetries = 0;
 
-    const log = (message) => console.log(`[Bypass Tool] ${message}`);
-    const xpath = (path) => document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+    const log = (message) => {
+        // Có thể thay thế console.log thành render ra UI nếu muốn
+        console.log(`[Bypass Tool] ${message}`);
+    };
+
+    const xpath = (path) =>
+        document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+    // Hàm click phần tử qua xpath, trả về true/false và có log rõ ràng
     const clickElementByXpath = async (path) => {
         log(`Đang tìm và click vào phần tử: ${path}`);
         const element = xpath(path);
@@ -38,6 +48,7 @@
         return false;
     };
 
+    // Hàm nhập liệu giả lập người dùng (giữ nguyên tính năng gốc)
     const typeHumanLike = async (element, text) => {
         log(`Bắt đầu nhập mã: ${text}`);
         for (const char of text) {
@@ -48,6 +59,7 @@
         log(`Nhập mã hoàn tất.`);
     };
 
+    // Xử lý khi keyword không hợp lệ (vẫn đủ quy trình đổi mã)
     const handleInvalidKeyword = async () => {
         log("Từ khóa không hợp lệ. Bắt đầu quy trình đổi từ khóa...");
         await clickElementByXpath(XPATHS.errorButton);
@@ -60,6 +72,7 @@
         isTaskActive = false;
     };
 
+    // Hàm nhập code và submit
     const enterCodeAndSubmit = async (code) => {
         log("Countdown đã kết thúc và đã nhận được mã. Bắt đầu nhập liệu.");
         const inputField = xpath(XPATHS.inputField);
@@ -72,11 +85,11 @@
         }
     };
 
+    // Đếm ngược cho mỗi tác vụ
     const startCountdown = () => {
         let timeLeft = COUNTDOWN_SECONDS;
         countdownFinished = false;
         receivedCode = null;
-
         const timerId = setInterval(() => {
             if (!isTaskActive) {
                 clearInterval(timerId);
@@ -87,9 +100,7 @@
                 clearInterval(timerId);
                 log("Đếm ngược kết thúc.");
                 countdownFinished = true;
-                if (receivedCode) {
-                    enterCodeAndSubmit(receivedCode);
-                }
+                if (receivedCode) enterCodeAndSubmit(receivedCode);
                 return;
             }
             log(`Đang đếm ngược, còn lại: ${timeLeft} giây...`);
@@ -97,10 +108,9 @@
         }, 1000);
     };
 
+    // Kết nối WebSocket với server và tự động reconnect nếu lỗi
     const connectToServer = () => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            return;
-        }
+        if (ws && ws.readyState === WebSocket.OPEN) return;
         if (connectionRetries >= MAX_CONNECTION_RETRIES) {
             log(`Đã thử kết nối ${MAX_CONNECTION_RETRIES} lần và thất bại. Dừng lại.`);
             return;
@@ -115,15 +125,18 @@
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch (e) {
+                log("Lỗi khi parse dữ liệu từ server.");
+                return;
+            }
             log(`Nhận được tin nhắn từ server: ${JSON.stringify(data)}`);
-
             if (data.type === "code_result" && data.code) {
                 receivedCode = data.code;
                 log(`Đã nhận được mã: ${receivedCode}`);
-                if (countdownFinished) {
-                    enterCodeAndSubmit(receivedCode);
-                }
+                if (countdownFinished) enterCodeAndSubmit(receivedCode);
             } else if (data.type === "task_failed") {
                 if (data.reason === "invalid_keyword") {
                     handleInvalidKeyword();
@@ -146,10 +159,9 @@
         };
     };
 
+    // Hàm chính kiểm tra từ khóa mới và gửi yêu cầu tới server
     const mainTaskExecutor = () => {
-        if (isTaskActive) {
-            return;
-        }
+        if (isTaskActive) return;
 
         const keywordElement = xpath(XPATHS.keyword);
         const keyword = keywordElement ? keywordElement.innerText.trim() : null;
@@ -169,8 +181,11 @@
             startCountdown();
         }
     };
-    
+
+    // Khởi động script
     log("Bypass tool đã khởi động. Bắt đầu vòng lặp kiểm tra tác vụ.");
     connectToServer();
     setInterval(mainTaskExecutor, TASK_CHECK_INTERVAL);
+
+    // Nếu muốn render ra UI, có thể bổ sung thêm code ở đây, ví dụ tạo popup, modal...
 })();
